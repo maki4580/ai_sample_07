@@ -12,11 +12,11 @@ export class ProductService {
     this.repository = new ProductRepository();
   }
 
-  async generateExcelTemplate(): Promise<Buffer> {
+  async generateExcelTemplate(): Promise<Uint8Array> {
     return createExcelTemplate();
   }
 
-  async exportToExcel(): Promise<Buffer> {
+  async exportToExcel(): Promise<Uint8Array> {
     const products = await this.repository.findAll();
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('商品一覧');
@@ -45,13 +45,22 @@ export class ProductService {
       fgColor: { argb: 'FFE0E0E0' }
     };
 
-    // シート保護
+    // シートの保護設定
     const password = process.env.EXCEL_PASSWORD;
     if (!password) {
       throw new Error('Excel password is not set in environment variables');
     }
 
-    worksheet.protect(password, {
+    // セルのロック設定
+    worksheet.eachRow((row, rowNumber) => {
+      row.eachCell((cell) => {
+        cell.protection = {
+          locked: true
+        };
+      });
+    });
+
+    const protectionOptions = {
       selectLockedCells: true,
       selectUnlockedCells: true,
       formatCells: false,
@@ -65,15 +74,17 @@ export class ProductService {
       sort: false,
       autoFilter: false,
       pivotTables: false
-    });
+    };
+
+    worksheet.protect(password, protectionOptions);
 
     const arrayBuffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(arrayBuffer);
+    return new Uint8Array(arrayBuffer);
   }
 
-  async importFromExcel(buffer: Buffer): Promise<ExcelRow[]> {
+  async importFromExcel(buffer: Buffer | Uint8Array): Promise<ExcelRow[]> {
     const workbook = new ExcelJS.Workbook();
-    const arrayBuffer = new Uint8Array(buffer).buffer;
+    const arrayBuffer = buffer instanceof Buffer ? buffer.buffer : buffer;
     await workbook.xlsx.load(arrayBuffer);
 
     const worksheet = workbook.getWorksheet(1);
@@ -81,15 +92,11 @@ export class ProductService {
       throw new ValidationError('Excelファイルにシートが存在しません');
     }
 
-    // シート保護の確認
-    const password = process.env.EXCEL_PASSWORD;
-    if (!password) {
-      throw new Error('Excel password is not set in environment variables');
-    }
+    // シートが保護されているかどうかの確認
+    const wsModel = (worksheet as any).model;
+    const isProtected = !!(wsModel?.sheetProtection?.sheet);
 
-    // シートが保護されているかを確認
-    const worksheetProtection = (worksheet as any)._worksheet?.sheetProtection;
-    if (!worksheetProtection?.sheet) {
+    if (!isProtected) {
       throw new ValidationError('Excelファイルが保護されていません');
     }
 
@@ -103,14 +110,20 @@ export class ProductService {
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber > 1) { // ヘッダー行をスキップ
         const values = row.values as any[];
-        rows.push({
-          version: values[1],
-          productCode: values[2],
-          productName: values[3],
-          demand: values[4]
-        });
+        if (values.length >= 5) {
+          rows.push({
+            version: values[1],
+            productCode: values[2],
+            productName: values[3],
+            demand: values[4]
+          });
+        }
       }
     });
+
+    if (rows.length === 0) {
+      throw new ValidationError('有効なデータが存在しません');
+    }
 
     return validateExcelData(rows);
   }

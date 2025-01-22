@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ProductService } from '@/lib/services/product-service';
 import { ProductSchema, ExcelRow } from '@/lib/validations/product';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 
-const UPLOAD_DIR = path.join(os.tmpdir(), 'product-excel-uploads');
-
-// アップロードディレクトリの作成
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-}
+const UPLOAD_DIR = '/tmp/product-excel-uploads';
 
 export async function GET() {
   try {
@@ -46,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    const buffer = new Uint8Array(bytes);
 
     const service = new ProductService();
     const products = await service.importFromExcel(buffer);
